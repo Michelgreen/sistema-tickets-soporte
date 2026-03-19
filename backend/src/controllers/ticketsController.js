@@ -107,6 +107,7 @@ exports.updateEstado = async (req, res) => {
       fechaCierre = new Date();
     }
 
+    // 🔥 1. Actualizar ticket
     await pool.query(
       `
       UPDATE tickets 
@@ -116,6 +117,7 @@ exports.updateEstado = async (req, res) => {
       [estado, fechaCierre, id]
     );
 
+    // 🔥 2. Guardar historial
     await pool.query(
       `
       INSERT INTO historial_estados 
@@ -125,15 +127,41 @@ exports.updateEstado = async (req, res) => {
       [id, ticket.estado, estado]
     );
 
+    // 🔥 3. Obtener ticket actualizado
+    const [[ticketCompleto]] = await pool.query(
+      `
+      SELECT 
+        t.*,
+        d.nombre AS departamento
+      FROM tickets t
+      JOIN departamentos d ON t.departamento_id = d.id
+      WHERE t.id = ?
+      `,
+      [id]
+    );
+
+    // 🔥 4. Obtener instancia de socket
+    const io = req.app.get("io");
+
+    // 🔥 5. Emitir evento detalle
+    io.to(id.toString()).emit("estadoActualizado", {
+      ticketId: id,
+      nuevoEstado: estado,
+      fechaCierre
+    });
+
+    // 🔥 6. Emitir evento global SIEMPRE
+    io.emit("ticketActualizadoGlobal", ticketCompleto);
+
     res.json({ message: "Estado actualizado correctamente" });
+
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Error al cambiar estado" });
   }
 };
-
 // ===============================
-// Responder ticket (TI)
+// Responder ticket (TI) - REALTIME
 // ===============================
 exports.responderTicket = async (req, res) => {
   const { id } = req.params;
@@ -161,7 +189,8 @@ exports.responderTicket = async (req, res) => {
         .json({ message: "No se puede responder un ticket cerrado" });
     }
 
-    await pool.query(
+    // 1️⃣ Insertamos respuesta
+    const [result] = await pool.query(
       `
       INSERT INTO respuestas 
       (ticket_id, autor, contenido, es_respuesta_ti)
@@ -170,13 +199,28 @@ exports.responderTicket = async (req, res) => {
       [id, contenido]
     );
 
+    // 2️⃣ Obtenemos la respuesta recién creada
+    const [[nuevaRespuesta]] = await pool.query(
+      `
+      SELECT id, autor, contenido, es_respuesta_ti, fecha_respuesta
+      FROM respuestas
+      WHERE id = ?
+      `,
+      [result.insertId]
+    );
+
+    // 3️⃣ Emitimos por socket al room del ticket
+    const io = req.app.get("io");
+    io.to(id.toString()).emit("nuevaRespuesta", nuevaRespuesta);
+
+    // 4️⃣ Respondemos HTTP normal
     res.json({ message: "Respuesta enviada correctamente" });
+
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: "Error al responder ticket" });
   }
 };
-
 // ===============================
 // Historial de estados (PRO)
 // ===============================
@@ -232,6 +276,8 @@ exports.deleteTicketCerrado = async (req, res) => {
         message: "Solo se pueden eliminar tickets cerrados"
       });
     }
+    const io = req.app.get("io");
+    io.emit("ticketEliminado", id);
 
     res.json({ message: "Ticket eliminado correctamente" });
 
@@ -247,6 +293,9 @@ exports.deleteAllCerrados = async (req, res) => {
       `DELETE FROM tickets
        WHERE estado = 'Cerrado'`
     );
+
+    const io = req.app.get("io");
+    io.emit("ticketsCerradosVaciados");
 
     res.json({
       message: `${result.affectedRows} tickets cerrados eliminados`
@@ -266,16 +315,30 @@ exports.deleteRespuesta = async (req, res) => {
       return res.status(400).json({ message: "ID inválido" });
     }
 
-    const [result] = await pool.query(
-      `DELETE FROM respuestas WHERE id = ?`,
+    // 🔥 Obtener ticket_id antes de eliminar
+    const [[respuesta]] = await pool.query(
+      `SELECT ticket_id FROM respuestas WHERE id = ?`,
       [id]
     );
 
-    if (result.affectedRows === 0) {
+    if (!respuesta) {
       return res.status(404).json({
         message: "Respuesta no encontrada"
       });
     }
+
+    const ticketId = respuesta.ticket_id;
+
+    // 🔥 Eliminar respuesta
+    await pool.query(
+      `DELETE FROM respuestas WHERE id = ?`,
+      [id]
+    );
+
+    // 🔥 Emitir evento
+    const io = req.app.get("io");
+    console.log("Emitir respuestaEliminada al ticket:", ticketId);
+    io.to(ticketId.toString()).emit("respuestaEliminada", id);
 
     res.json({ message: "Respuesta eliminada correctamente" });
 
@@ -284,6 +347,5 @@ exports.deleteRespuesta = async (req, res) => {
     res.status(500).json({ message: "Error al eliminar respuesta" });
   }
 };
-
 
 

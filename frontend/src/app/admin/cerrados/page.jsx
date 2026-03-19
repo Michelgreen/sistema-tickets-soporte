@@ -5,6 +5,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { formatDate } from "@/utils/formatDate";
 import { Eye, Trash2, ArchiveRestore, Search, X } from "lucide-react";
 import Link from "next/link";
+import socket from "@/lib/socket";
 
 export default function TicketsCerradosPage() {
   const [tickets, setTickets] = useState([]);
@@ -35,6 +36,44 @@ export default function TicketsCerradosPage() {
   useEffect(() => {
     fetchTickets();
   }, []);
+
+  useEffect(() => {
+socket.on("ticketActualizadoGlobal", (ticket) => {
+  setTickets((prev) => {
+    // Si ya no está cerrado → quitarlo
+    if (ticket.estado !== "Cerrado") {
+      return prev.filter((t) => t.id !== ticket.id);
+    }
+
+    // Si ahora está cerrado → agregar si no existe
+    const existe = prev.some((t) => t.id === ticket.id);
+
+    if (existe) {
+      return prev.map((t) =>
+        t.id === ticket.id ? ticket : t
+      );
+    }
+
+    return [ticket, ...prev];
+  });
+});
+
+socket.on("ticketEliminado", (id) => {
+    setTickets((prev) =>
+      prev.filter((t) => t.id !== Number(id))
+    );
+  });
+
+    socket.on("ticketsCerradosVaciados", () => {
+    setTickets([]);
+  });
+
+  return () => {
+    socket.off("ticketActualizadoGlobal");
+    socket.off("ticketEliminado");
+    socket.off("ticketsCerradosVaciados");
+  };
+}, []);
 
   /* =========================
      ACCIONES

@@ -6,46 +6,76 @@ import { motion, AnimatePresence } from "framer-motion";
 import { obtenerMisTickets } from "@/services/ticketsService";
 import { formatDate } from "@/utils/formatDate";
 import { Search, Ticket, ticket } from "lucide-react";
+import socket from "@/lib/socket";
 
 export default function UsuarioPage() {
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busqueda, setBusqueda] = useState("");
   const [paginaActual, setPaginaActual] = useState(1);
+  
 
   const ticketsPorPagina = 3;
 
-  /* =========================
-     CARGA + POLLING
-  ========================= */
   useEffect(() => {
-    let interval;
+  const cargarTickets = async () => {
+    try {
+      const data = await obtenerMisTickets();
 
-    const cargarTickets = async () => {
-      try {
-        const data = await obtenerMisTickets();
+      const activos = data
+        .filter((t) => t.estado !== "Cerrado")
+        .sort(
+          (a, b) =>
+            new Date(b.fecha_creacion) -
+            new Date(a.fecha_creacion)
+        );
 
-        const activos = data
-          .filter((t) => t.estado !== "Cerrado")
-          .sort(
-            (a, b) =>
-              new Date(b.fecha_creacion) -
-              new Date(a.fecha_creacion)
-          );
+      setTickets(activos);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-        setTickets(activos);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        setLoading(false);
+  cargarTickets();
+}, []);
+
+useEffect(() => {
+  socket.on("ticketActualizadoGlobal", (ticket) => {
+    setTickets((prev) => {
+      // Si ahora está cerrado → quitarlo de activos
+      if (ticket.estado === "Cerrado") {
+        return prev.filter((t) => t.id !== ticket.id);
       }
-    };
 
-    cargarTickets();
-    interval = setInterval(cargarTickets, 4000);
+      // Si es activo → actualizar o agregar
+      const existe = prev.some((t) => t.id === ticket.id);
 
-    return () => clearInterval(interval);
-  }, []);
+      if (existe) {
+        return prev.map((t) =>
+          t.id === ticket.id ? ticket : t
+        );
+      }
+
+      return [ticket, ...prev];
+    });
+  });
+
+  socket.on("nuevoTicket", (ticket) => {
+    // Solo agregar si pertenece al usuario
+    setTickets((prev) => {
+      if (prev.some((t) => t.id === ticket.id)) return prev;
+      if (ticket.estado === "Cerrado") return prev;
+      return [ticket, ...prev];
+    });
+  });
+
+  return () => {
+    socket.off("ticketActualizadoGlobal");
+    socket.off("nuevoTicket");
+  };
+}, []);
 
   /* =========================
      FILTRADO BUSCADOR

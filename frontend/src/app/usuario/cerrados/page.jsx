@@ -6,6 +6,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { obtenerMisTickets } from "@/services/ticketsService";
 import { formatDate } from "@/utils/formatDate";
 import { Search, Archive } from "lucide-react";
+import socket from "@/lib/socket";
 
 export default function TicketsCerradosPage() {
     const [tickets, setTickets] = useState([]);
@@ -15,37 +16,67 @@ export default function TicketsCerradosPage() {
 
     const ticketsPorPagina = 5;
 
-    /* =========================
-       CARGA + POLLING
-    ========================= */
-    useEffect(() => {
-        let interval;
+useEffect(() => {
+  const cargarTickets = async () => {
+    try {
+      const data = await obtenerMisTickets();
 
-        const cargarTickets = async () => {
-            try {
-                const data = await obtenerMisTickets();
+      const cerrados = data
+        .filter((t) => t.estado === "Cerrado")
+        .sort(
+          (a, b) =>
+            new Date(b.fecha_cierre) -
+            new Date(a.fecha_cierre)
+        );
 
-                const cerrados = data
-                    .filter((t) => t.estado === "Cerrado")
-                    .sort(
-                        (a, b) =>
-                            new Date(b.fecha_creacion) -
-                            new Date(a.fecha_creacion)
-                    );
+      setTickets(cerrados);
+    } catch (error) {
+      console.error(error);
+    } finally {
+      setLoading(false);
+    }
+  };
 
-                setTickets(cerrados);
-            } catch (error) {
-                console.error(error);
-            } finally {
-                setLoading(false);
-            }
-        };
+  cargarTickets();
+}, []);
 
-        cargarTickets();
-        interval = setInterval(cargarTickets, 4000);
+useEffect(() => {
+  socket.on("ticketActualizadoGlobal", (ticket) => {
+    setTickets((prev) => {
+      // Si ya no está cerrado → quitarlo
+      if (ticket.estado !== "Cerrado") {
+        return prev.filter((t) => t.id !== ticket.id);
+      }
 
-        return () => clearInterval(interval);
-    }, []);
+      // Si ahora está cerrado → actualizar o agregar
+      const existe = prev.some((t) => t.id === ticket.id);
+
+      if (existe) {
+        return prev.map((t) =>
+          t.id === ticket.id ? ticket : t
+        );
+      }
+
+      return [ticket, ...prev];
+    });
+  });
+
+  socket.on("ticketEliminado", (id) => {
+    setTickets((prev) =>
+      prev.filter((t) => t.id !== Number(id))
+    );
+  });
+
+  socket.on("ticketsCerradosVaciados", () => {
+    setTickets([]);
+  });
+
+  return () => {
+    socket.off("ticketActualizadoGlobal");
+    socket.off("ticketEliminado");
+    socket.off("ticketsCerradosVaciados");
+  };
+}, []);
 
     /* =========================
        NORMALIZAR TEXTO (sin acentos)

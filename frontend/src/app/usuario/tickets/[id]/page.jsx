@@ -1,5 +1,6 @@
 "use client";
 
+import socket from "@/lib/socket";
 import { useEffect, useState, useRef } from "react";
 import { useParams } from "next/navigation";
 import {
@@ -54,32 +55,45 @@ export default function DetalleTicket() {
     cargarTicket();
   }, [id]);
 
-  // 🔥 Polling inteligente
+/* =========================
+   SOCKET ROOM
+========================= */
 useEffect(() => {
   if (!id) return;
 
-  const interval = setInterval(async () => {
-    try {
-      const data = await obtenerDetalleTicket(id);
+  socket.emit("joinTicket", id);
 
-      // 🔥 Si cambió el estado, actualizarlo
-      if (ticket && data.ticket.estado !== ticket.estado) {
-        setTicket(data.ticket);
-      }
+  socket.on("nuevaRespuesta", (nueva) => {
+    setRespuestas((prev) => {
+      if (prev.some((r) => r.id === nueva.id)) return prev;
+      return [...prev, nueva];
+    });
+  });
+  
+socket.on("respuestaEliminada", (respuestaId) => {
+  console.log("Evento recibido en usuario:", respuestaId);
 
-      // 🔥 Si cambiaron respuestas, actualizar
-      setRespuestas((prev) => {
-        if (JSON.stringify(prev) !== JSON.stringify(data.respuestas)) {
-          return data.respuestas;
-        }
-        return prev;
-      });
+setRespuestas((prev) =>
+    prev.filter((r) => r.id !== Number(respuestaId))
+  );
+});
 
-    } catch {}
-  }, 5000);
+socket.on("estadoActualizado", (data) => {
+  console.log("Estado actualizado recibido:", data);
 
-  return () => clearInterval(interval);
-}, [id, ticket]);
+  setTicket((prev) => ({
+    ...prev,
+    estado: data.nuevoEstado,
+    fecha_cierre: data.fechaCierre
+  }));
+});
+
+  return () => {
+    socket.off("nuevaRespuesta");
+    socket.off("respuestaEliminada");
+    socket.off("estadoActualizado");
+  };
+}, [id]);
 
   // 🔥 Detectar si está abajo
   useEffect(() => {
@@ -115,13 +129,13 @@ useEffect(() => {
     }
   }, [respuestas, isAtBottom]);
 
-  const enviarRespuesta = async () => {
-    if (!mensaje.trim()) return;
+const enviarRespuesta = async () => {
+  if (!mensaje.trim()) return;
 
-    await responderTicketUsuario(id, mensaje);
-    setMensaje("");
-    await cargarRespuestas();
-  };
+  await responderTicketUsuario(id, mensaje);
+  setMensaje("");
+  // El socket actualizará automáticamente
+};
 
   const estadoColor = (estado) => {
     switch (estado) {

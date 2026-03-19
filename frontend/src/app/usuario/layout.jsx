@@ -1,5 +1,8 @@
 "use client";
 
+
+import { useEffect } from "react";
+import socket from "@/lib/socket";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
@@ -9,6 +12,15 @@ export default function UsuarioLayout({ children }) {
     const router = useRouter();
     const pathname = usePathname();
     const [open, setOpen] = useState(false);
+
+useEffect(() => {
+  socket.connect();
+  console.log("Socket Usuario conectado:", socket.id);
+
+  return () => {
+    socket.disconnect();
+  };
+}, []);
 
     const handleLogout = async () => {
         await fetch("http://localhost:3001/api/auth/logout", {

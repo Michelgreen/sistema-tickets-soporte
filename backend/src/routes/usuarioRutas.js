@@ -64,6 +64,23 @@ router.post(
         ]
       );
 
+      // 🔥 Obtener ticket recién creado con nombre de departamento
+const [[ticketCreado]] = await pool.query(
+  `
+  SELECT 
+    t.*,
+    d.nombre AS departamento
+  FROM tickets t
+  JOIN departamentos d ON t.departamento_id = d.id
+  WHERE t.id = ?
+  `,
+  [ticketId]
+);
+
+// 🔥 Emitir evento a todos los admins
+const io = req.app.get("io");
+io.emit("nuevoTicket", ticketCreado);
+
       res.status(201).json({
         message: "Ticket creado correctamente",
         ticketId
@@ -160,7 +177,7 @@ router.get(
 
 
 // ===============================
-// Responder ticket (Usuario)
+// Responder ticket (Usuario) - REALTIME
 // ===============================
 router.post(
   "/tickets/:id/responder",
@@ -195,7 +212,8 @@ router.post(
         });
       }
 
-      await pool.query(
+      // 1️⃣ Insertar respuesta
+      const [result] = await pool.query(
         `
         INSERT INTO respuestas
         (ticket_id, autor, contenido, es_respuesta_ti)
@@ -204,6 +222,21 @@ router.post(
         [id, contenido]
       );
 
+      // 2️⃣ Obtener la respuesta recién creada
+      const [[nuevaRespuesta]] = await pool.query(
+        `
+        SELECT id, autor, contenido, es_respuesta_ti, fecha_respuesta
+        FROM respuestas
+        WHERE id = ?
+        `,
+        [result.insertId]
+      );
+
+      // 3️⃣ Emitir evento por socket
+      const io = req.app.get("io");
+      io.to(id.toString()).emit("nuevaRespuesta", nuevaRespuesta);
+
+      // 4️⃣ Respuesta HTTP normal
       res.json({ message: "Respuesta enviada correctamente" });
 
     } catch (error) {

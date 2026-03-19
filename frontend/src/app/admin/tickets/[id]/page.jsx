@@ -10,6 +10,7 @@ import {
 import { formatDate } from "@/utils/formatDate";
 import { motion, AnimatePresence } from "framer-motion";
 import { Send, RefreshCcw, Trash2 } from "lucide-react";
+import socket from "@/lib/socket";
 
 export default function TicketDetailPage() {
   const { id } = useParams();
@@ -62,15 +63,48 @@ export default function TicketDetailPage() {
   }, [id]);
 
   /* =========================
-     POLLING
+     SOCKET ROOM
   ========================= */
   useEffect(() => {
     if (!id) return;
-    const interval = setInterval(() => {
-      cargarRespuestas();
-    }, 5000);
 
-    return () => clearInterval(interval);
+    socket.emit("joinTicket", id);
+
+    socket.on("nuevaRespuesta", (nueva) => {
+      setRespuestas((prev) => {
+        // evitar duplicados
+        if (prev.some((r) => r.id === nueva.id)) return prev;
+        return [...prev, nueva];
+      });
+    });
+
+    socket.on("respuestaEliminada", (respuestaId) => {
+      setRespuestas((prev) =>
+        prev.filter((r) => r.id !== respuestaId)
+      );
+    });
+
+    socket.on("estadoActualizado", (data) => {
+      setTicket((prev) => ({
+        ...prev,
+        estado: data.nuevoEstado,
+        fecha_cierre: data.fechaCierre
+      }));
+    });
+
+    socket.on("ticketActualizadoGlobal", (updatedTicket) => {
+      if (updatedTicket.id === Number(id)) {
+        setTicket(updatedTicket);
+      }
+    });
+
+
+    return () => {
+      socket.off("nuevaRespuesta");
+      socket.off("respuestaEliminada");
+      socket.off("estadoActualizado");
+      socket.off("ticketActualizadoGlobal");
+    };
   }, [id]);
 
   /* =========================
@@ -132,8 +166,19 @@ export default function TicketDetailPage() {
   const abrirModal = (action, data = null) => {
     let message = "";
 
-    if (action === "estado")
+    if (action === "estado") {
+      if (nuevoEstado === ticket.estado) {
+        setModal({
+          open: true,
+          action: "estadoDuplicado",
+          data: null,
+          message: `El ticket ya está en estado "${ticket.estado}".`,
+        });
+        return;
+      }
+
       message = `¿Cambiar estado a "${nuevoEstado}"?`;
+    }
 
     if (action === "eliminarRespuesta")
       message = "¿Eliminar esta respuesta?";
@@ -148,7 +193,6 @@ export default function TicketDetailPage() {
       try {
         setLoadingEstado(true);
         await updateEstado(id, nuevoEstado);
-        await cargarTicket();
       } finally {
         setLoadingEstado(false);
       }
@@ -175,7 +219,7 @@ export default function TicketDetailPage() {
       setLoadingRespuesta(true);
       await responderTicket(id, respuesta);
       setRespuesta("");
-      await cargarRespuestas();
+      // no cargamos manualmente, el socket lo hará
     } finally {
       setLoadingRespuesta(false);
     }
@@ -352,19 +396,24 @@ export default function TicketDetailPage() {
               <div className="flex justify-end gap-4">
                 <button
                   onClick={() =>
-                    setModal({ open: false, action: null, data: null })
+                    setModal({ open: false, action: null, data: null, message: "" })
                   }
-                  className="px-4 py-2 rounded-lg bg-gray-200 hover:bg-gray-300 transition"
+                  className={`px-4 py-2 rounded-lg transition ${modal.action === "estadoDuplicado"
+                      ? "bg-yellow-500 text-white hover:bg-yellow-600"
+                      : "bg-gray-200 hover:bg-gray-300"
+                    }`}
                 >
-                  Cancelar
+                  {modal.action === "estadoDuplicado" ? "Entendido" : "Cancelar"}
                 </button>
 
-                <button
-                  onClick={confirmarAccion}
-                  className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition"
-                >
-                  Confirmar
-                </button>
+                {modal.action !== "estadoDuplicado" && (
+                  <button
+                    onClick={confirmarAccion}
+                    className="px-4 py-2 rounded-lg bg-red-600 text-white hover:bg-red-700 transition"
+                  >
+                    Confirmar
+                  </button>
+                )}
               </div>
             </motion.div>
           </motion.div>

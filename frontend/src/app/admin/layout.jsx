@@ -1,5 +1,7 @@
 "use client";
 
+import { useEffect } from "react";
+import socket from "@/lib/socket";
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
@@ -9,6 +11,20 @@ export default function AdminLayout({ children }) {
   const router = useRouter();
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+
+    /* SOCKET CONNECTION */
+  useEffect(() => {
+    socket.connect();
+
+    socket.on("connect", () => {
+      console.log("Socket Admin conectado:", socket.id);
+    });
+
+    return () => {
+      socket.disconnect();
+      console.log("Socket Admin desconectado");
+    };
+  }, []);
 
   const handleLogout = async () => {
     await fetch("http://localhost:3001/api/auth/logout", {
